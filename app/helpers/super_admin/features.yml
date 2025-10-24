@@ -2,38 +2,38 @@
 # No need to replicate the same values in two places
 
 # ------- Premium Features ------- #
-# captain:
-#   name: 'Captain'
-#   description: 'Enable AI-powered conversations with your customers.'
-#   enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
-#   icon: 'icon-captain'
-#   config_key: 'captain'
-#   enterprise: true
+captain:
+  name: 'Captain'
+  description: 'Enable AI-powered conversations with your customers.'
+  enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
+  icon: 'icon-captain'
+  config_key: 'captain'
+  enterprise: true
 custom_branding:
   name: 'Custom Branding'
   description: 'Apply your own branding to this installation.'
-  enabled: true
+  enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
   icon: 'icon-paint-brush-line'
   config_key: 'custom_branding'
-  enterprise: false
+  enterprise: true
 agent_capacity:
   name: 'Agent Capacity'
   description: 'Set limits to auto-assigning conversations to your agents.'
-  enabled: true
+  enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
   icon: 'icon-hourglass-line'
-  enterprise: false
+  enterprise: true
 audit_logs:
   name: 'Audit Logs'
   description: 'Track and trace account activities with ease with detailed audit logs.'
-  enabled: true
+  enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
   icon: 'icon-menu-search-line'
-  enterprise: false
+  enterprise: true
 disable_branding:
   name: 'Disable Branding'
   description: 'Disable branding on live-chat widget and external emails.'
-  enabled: true
+  enabled: <%= (ChatwootHub.pricing_plan != 'community') %>
   icon: 'icon-sailbot-fill'
-  enterprise: false
+  enterprise: true
 
 # ------- Product Features ------- #
 help_center:
