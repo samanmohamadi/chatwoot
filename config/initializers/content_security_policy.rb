@@ -4,6 +4,12 @@
 # For further information see the following documentation
 # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy
 
+# NOTE: If you enable CSP, you need to add Google Tag Manager domains if GTM_CONTAINER_ID env var is set:
+# - script-src: https://www.googletagmanager.com
+# - img-src: https://www.googletagmanager.com
+# - connect-src: https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com
+# - frame-src: https://www.googletagmanager.com
+
 # Rails.application.config.content_security_policy do |policy|
 #   policy.default_src :self, :https
 #   policy.font_src    :self, :https, :data
@@ -19,6 +25,14 @@
 #    policy.style_src *policy.style_src, :unsafe_inline if Rails.env.development?
 # Allow @vite/client to hot reload changes in development
 #    policy.connect_src *policy.connect_src, "ws://#{ ViteRuby.config.host_with_port }" if Rails.env.development?
+#
+# If GTM is enabled via GTM_CONTAINER_ID environment variable, add GTM domains:
+#   if ENV['GTM_CONTAINER_ID'].present?
+#     policy.script_src *policy.script_src, 'https://www.googletagmanager.com'
+#     policy.img_src *policy.img_src, 'https://www.googletagmanager.com'
+#     policy.connect_src *policy.connect_src, 'https://www.googletagmanager.com', 'https://*.google-analytics.com', 'https://*.analytics.google.com'
+#     policy.frame_src *policy.frame_src, 'https://www.googletagmanager.com'
+#   end
 
 #   # Specify URI for violation reports
 #   # policy.report_uri "/csp-violation-report-endpoint"
