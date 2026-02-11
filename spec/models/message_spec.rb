@@ -45,6 +45,48 @@ RSpec.describe Message do
         end
       end
     end
+
+    context 'when it validates source_id length' do
+      it 'valid when source_id is within text limit (20000 chars)' do
+        long_source_id = 'a' * 10_000
+        message.source_id = long_source_id
+        expect(message.valid?).to be true
+      end
+
+      it 'valid when source_id is exactly 20000 characters' do
+        long_source_id = 'a' * 20_000
+        message.source_id = long_source_id
+        expect(message.valid?).to be true
+      end
+
+      it 'invalid when source_id exceeds text limit (20000 chars)' do
+        long_source_id = 'a' * 20_001
+        message.source_id = long_source_id
+        message.valid?
+
+        expect(message.errors[:source_id]).to include('is too long (maximum is 20000 characters)')
+      end
+
+      it 'handles long email Message-ID headers correctly' do
+        # Simulate a long Message-ID like some email systems generate
+        long_message_id = "msg-#{SecureRandom.hex(240)}@verylongdomainname.example.com"[0...500]
+        message.source_id = long_message_id
+        message.content_type = 'incoming_email'
+
+        expect(message.valid?).to be true
+        expect(message.source_id.length).to eq(500)
+      end
+
+      it 'allows nil source_id' do
+        message.source_id = nil
+        expect(message.valid?).to be true
+      end
+
+      it 'allows empty string source_id' do
+        message.source_id = ''
+        expect(message.valid?).to be true
+      end
+    end
   end
 
   describe 'concerns' do
@@ -258,6 +300,63 @@ RSpec.describe Message do
 
       expect(conversation.waiting_since).to eq old_waiting_since
     end
+
+    context 'when bot has responded to the conversation' do
+      let(:agent_bot) { create(:agent_bot, account: conversation.account) }
+
+      before do
+        # Create initial customer message
+        create(:message, conversation: conversation, message_type: :incoming,
+                         created_at: 2.hours.ago)
+        conversation.update(waiting_since: 2.hours.ago)
+
+        # Bot responds
+        create(:message, conversation: conversation, message_type: :outgoing,
+                         sender: agent_bot, created_at: 1.hour.ago)
+      end
+
+      it 'resets waiting_since when customer sends a new message after bot response' do
+        new_message = build(:message, conversation: conversation, message_type: :incoming)
+        new_message.save!
+
+        conversation.reload
+        expect(conversation.waiting_since).to be_within(1.second).of(new_message.created_at)
+      end
+
+      it 'does not reset waiting_since if last response was from human agent' do
+        # Human agent responds (clears waiting_since)
+        create(:message, conversation: conversation, message_type: :outgoing,
+                         sender: agent)
+        conversation.reload
+        expect(conversation.waiting_since).to be_nil
+
+        # Customer sends new message
+        new_message = build(:message, conversation: conversation, message_type: :incoming)
+        new_message.save!
+
+        conversation.reload
+        expect(conversation.waiting_since).to be_within(1.second).of(new_message.created_at)
+      end
+
+      it 'clears waiting_since when bot responds' do
+        # After the bot response in before block, waiting_since should already be cleared
+        conversation.reload
+        expect(conversation.waiting_since).to be_nil
+
+        # Customer sends another message
+        create(:message, conversation: conversation, message_type: :incoming,
+                         created_at: 30.minutes.ago)
+        conversation.reload
+        expect(conversation.waiting_since).to be_within(1.second).of(30.minutes.ago)
+
+        # Another bot response should clear it again
+        create(:message, conversation: conversation, message_type: :outgoing,
+                         sender: agent_bot, created_at: 15.minutes.ago)
+
+        conversation.reload
+        expect(conversation.waiting_since).to be_nil
+      end
+    end
   end
 
   context 'with webhook_data' do
@@ -327,14 +426,11 @@ RSpec.describe Message do
         message.conversation.contact.update!(email: 'test@example.com')
         message.message_type = 'outgoing'
 
-        # Perform jobs inline to test full integration
-        perform_enqueued_jobs do
-          message.save!
+        ActiveJob::Base.queue_adapter = :test
+        allow(Redis::Alfred).to receive(:set).and_return(true)
+        perform_enqueued_jobs(only: SendReplyJob) do
+          expect { message.save! }.to have_enqueued_job(ConversationReplyEmailJob).with(message.conversation.id, kind_of(Integer)).on_queue('mailers')
         end
-
-        # Verify the email worker is eventually scheduled through the service
-        jobs_for_conversation_count = ConversationReplyEmailWorker.jobs.count { |job| job['args'].first == message.conversation.id }
-        expect(jobs_for_conversation_count).to eq(1)
       end
 
       it 'does not schedule email for website channel if continuity is disabled' do
@@ -345,15 +441,8 @@ RSpec.describe Message do
         message.conversation.contact.update!(email: 'test@example.com')
         message.message_type = 'outgoing'
 
-        initial_job_count = ConversationReplyEmailWorker.jobs.count { |job| job['args'].first == message.conversation.id }
-
-        perform_enqueued_jobs do
-          message.save!
-        end
-
-        # No new jobs should be scheduled for this conversation
-        jobs_for_conversation_count = ConversationReplyEmailWorker.jobs.count { |job| job['args'].first == message.conversation.id }
-        expect(jobs_for_conversation_count).to eq(initial_job_count)
+        ActiveJob::Base.queue_adapter = :test
+        expect { message.save! }.not_to have_enqueued_job(ConversationReplyEmailJob)
       end
 
       it 'does not schedule email for private notes' do
@@ -363,15 +452,8 @@ RSpec.describe Message do
         message.private = true
         message.message_type = 'outgoing'
 
-        initial_job_count = ConversationReplyEmailWorker.jobs.count { |job| job['args'].first == message.conversation.id }
-
-        perform_enqueued_jobs do
-          message.save!
-        end
-
-        # No new jobs should be scheduled for this conversation
-        jobs_for_conversation_count = ConversationReplyEmailWorker.jobs.count { |job| job['args'].first == message.conversation.id }
-        expect(jobs_for_conversation_count).to eq(initial_job_count)
+        ActiveJob::Base.queue_adapter = :test
+        expect { message.save! }.not_to have_enqueued_job(ConversationReplyEmailJob)
       end
 
       it 'calls SendReplyJob for all channels' do
