@@ -50,6 +50,85 @@ RSpec.describe Account do
     end
   end
 
+  describe 'conversation unread counts feature flag' do
+    let(:account) { create(:account) }
+    let(:inbox) { create(:inbox, account: account) }
+    let(:user) { create(:user) }
+    let(:store) { Conversations::UnreadCounts::Store }
+    let(:inbox_key) { store.inbox_key(account.id, inbox.id) }
+    let(:filter_keys) do
+      [
+        store.user_mentions_key(account.id, user.id),
+        store.user_participating_key(account.id, user.id),
+        store.user_unattended_key(account.id, user.id),
+        store.user_folder_key(account.id, user.id, 1)
+      ]
+    end
+
+    after do
+      store.clear_all_account!(account.id)
+    end
+
+    it 'clears all unread count cache when the feature is enabled' do
+      build_unread_count_cache
+
+      account.enable_features!(:conversation_unread_counts)
+
+      expect_unread_count_cache_cleared
+    end
+
+    it 'clears all unread count cache when the feature is disabled' do
+      account.enable_features!(:conversation_unread_counts)
+      build_unread_count_cache
+
+      account.disable_features!(:conversation_unread_counts)
+
+      expect_unread_count_cache_cleared
+    end
+
+    it 'clears all unread count cache when account cache keys are reset' do
+      build_unread_count_cache
+
+      account.reset_cache_keys
+
+      expect_unread_count_cache_cleared
+    end
+
+    def expect_unread_count_cache_cleared
+      expect(unread_count_ready_markers).to all(be(false))
+      expect(store.counts_for_keys(unread_count_keys).values).to all(eq(0))
+    end
+
+    def unread_count_ready_markers
+      [
+        store.base_ready?(account.id),
+        store.assignment_ready?(account.id),
+        store.filters_ready?(account.id, user.id)
+      ]
+    end
+
+    def unread_count_keys
+      [inbox_key] + filter_keys
+    end
+
+    def build_unread_count_cache
+      store.mark_base_ready!(account.id)
+      store.mark_assignment_ready!(account.id)
+      store.mark_filters_ready!(account.id, user.id)
+      store.add_base_membership(account_id: account.id, inbox_id: inbox.id, label_ids: [], conversation_id: 1)
+      store.add_filter_memberships(
+        account_id: account.id,
+        user_id: user.id,
+        filters: {
+          mentions: [1],
+          participating: [2],
+          unattended: [3]
+        },
+        folders: { 1 => [4] }
+      )
+    end
+  end
+
   describe 'inbound_email_domain' do
     let(:account) { create(:account) }
 
@@ -198,6 +277,44 @@ RSpec.describe Account do
         expect(account.settings['auto_resolve_message']).to eq(message)
       end
 
+      it 'defaults captain_auto_resolve_mode to legacy when captain_tasks is disabled' do
+        allow(account).to receive(:feature_enabled?).with('captain_tasks').and_return(false)
+
+        expect(account.captain_auto_resolve_mode).to eq('legacy')
+        expect(account).to be_captain_auto_resolve_legacy
+      end
+
+      it 'defaults captain_auto_resolve_mode to evaluated when captain_tasks is enabled' do
+        allow(account).to receive(:feature_enabled?).with('captain_tasks').and_return(true)
+
+        expect(account.captain_auto_resolve_mode).to eq('evaluated')
+        expect(account).to be_captain_auto_resolve_evaluated
+      end
+
+      it 'correctly gets and sets captain_auto_resolve_mode' do
+        account.captain_auto_resolve_mode = 'legacy'
+
+        expect(account.captain_auto_resolve_mode).to eq('legacy')
+        expect(account.settings['captain_auto_resolve_mode']).to eq('legacy')
+        expect(account).to be_captain_auto_resolve_legacy
+      end
+
+      it 'allows clearing captain_auto_resolve_mode to fall back to feature defaults' do
+        allow(account).to receive(:feature_enabled?).with('captain_tasks').and_return(false)
+        account.captain_auto_resolve_mode = nil
+
+        expect(account).to be_valid
+        expect(account.captain_auto_resolve_mode).to eq('legacy')
+        expect(account.settings['captain_auto_resolve_mode']).to be_nil
+      end
+
+      it 'falls back to disabled mode from legacy settings key' do
+        account.settings = { 'captain_disable_auto_resolve' => true }
+
+        expect(account.captain_auto_resolve_mode).to eq('disabled')
+        expect(account).to be_captain_auto_resolve_disabled
+      end
+
       it 'handles nil values correctly' do
         account.auto_resolve_after = nil
         account.auto_resolve_message = nil
@@ -215,6 +332,44 @@ RSpec.describe Account do
       it 'does not find accounts without auto_resolve_after' do
         account.update(auto_resolve_after: nil)
         expect(described_class.with_auto_resolve.pluck(:id)).not_to include(account.id)
+      end
+    end
+
+    context 'when support_email is set' do
+      it 'allows a plain email address' do
+        account.support_email = 'support@example.com'
+        expect(account).to be_valid
+      end
+
+      it 'allows display-name format' do
+        account.support_email = 'Support Team <support@example.com>'
+        expect(account).to be_valid
+      end
+
+      it 'allows blank values' do
+        account.support_email = ''
+        expect(account).to be_valid
+      end
+
+      it 'rejects malformed strings with no email part' do
+        account.support_email = 'Smith Smith'
+        expect(account).not_to be_valid
+        expect(account.errors[:support_email]).to include(I18n.t('errors.account.support_email.invalid'))
+      end
+    end
+
+    context 'when reporting_timezone is set' do
+      it 'allows valid timezone names' do
+        account.reporting_timezone = 'America/New_York'
+
+        expect(account).to be_valid
+      end
+
+      it 'rejects invalid timezone names' do
+        account.reporting_timezone = 'Invalid/Timezone'
+
+        expect(account).not_to be_valid
+        expect(account.errors[:reporting_timezone]).to include(I18n.t('errors.account.reporting_timezone.invalid'))
       end
     end
   end
