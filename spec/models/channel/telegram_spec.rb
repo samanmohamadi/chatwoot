@@ -56,6 +56,16 @@ RSpec.describe Channel::Telegram do
   end
 
   context 'when a valid message and empty attachments' do
+    it 'sends a typing action for the conversation chat' do
+      conversation = create(:conversation, inbox: telegram_channel.inbox, additional_attributes: { 'chat_id' => '123' })
+
+      stub_request(:post, "https://api.telegram.org/bot#{telegram_channel.bot_token}/sendChatAction")
+        .with(body: 'chat_id=123&action=typing')
+        .to_return(status: 200, body: { ok: true, result: true }.to_json, headers: { 'Content-Type' => 'application/json' })
+
+      expect(telegram_channel.send_typing_action(conversation)).to be(true)
+    end
+
     it 'send message' do
       message = create(:message, message_type: :outgoing, content: 'test',
                                  conversation: create(:conversation, inbox: telegram_channel.inbox, additional_attributes: { 'chat_id' => '123' }))

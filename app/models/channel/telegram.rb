@@ -41,6 +41,19 @@ class Channel::Telegram < ApplicationRecord
     message_id
   end
 
+  # Telegram's typing action is transient. The caller refreshes it while work
+  # is in progress, so this method deliberately sends only the "typing" action.
+  def send_typing_action(conversation)
+    chat_id = conversation.additional_attributes['chat_id']
+    return false if chat_id.blank?
+
+    body = { chat_id: chat_id, action: 'typing' }
+    business_connection_id = conversation.additional_attributes['business_connection_id']
+    body[:business_connection_id] = business_connection_id if business_connection_id.present?
+
+    HTTParty.post("#{telegram_api_url}/sendChatAction", body: body).success?
+  end
+
   def get_telegram_profile_image(user_id)
     # get profile image from telegram
     response = HTTParty.get("#{telegram_api_url}/getUserProfilePhotos", query: { user_id: user_id })
